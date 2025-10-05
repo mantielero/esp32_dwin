@@ -1,0 +1,118 @@
+#include "DWIN_Screen.h"
+
+/* 
+ * CONFIGURACIÓN DE PINES SPI EN ESP32
+ * 
+ * VSPI (por defecto) - Bus SPI estándar:
+ *   CS   (Chip Select) -> GPIO 5
+ *   SCK  (Clock)       -> GPIO 18
+ *   MOSI (Master Out)  -> GPIO 23
+ *   MISO (Master In)   -> GPIO 19
+ * 
+ * HSPI (alternativo):
+ *   CS   -> GPIO 15
+ *   SCK  -> GPIO 14
+ *   MOSI -> GPIO 13
+ *   MISO -> GPIO 12
+ * 
+ * Puedes usar pines personalizados si lo necesitas
+ */
+
+// Opción 1: Usar pines por defecto VSPI
+DWINScreen dwin(5, 18, 23, 19);
+
+// Opción 2: Usar HSPI con pines personalizados
+// SPIClass hspi(HSPI);
+// DWINScreen dwin(&hspi, 15); // Solo especificar CS si usas pines por defecto del bus
+
+// Opción 3: Pines completamente personalizados
+// DWINScreen dwin(CS_PIN, SCK_PIN, MOSI_PIN, MISO_PIN);
+
+void setup() {
+    // Inicializar Serial para debugging
+    Serial.begin(115200);
+    Serial.println("Iniciando comunicación SPI con pantalla DWIN...");
+    
+    // Inicializar comunicación SPI
+    // Frecuencia: 1MHz es seguro para la mayoría de pantallas DWIN
+    // Puedes probar hasta 4MHz si tu pantalla lo soporta
+    dwin.begin(1000000); // 1MHz
+    
+    delay(500);
+    
+    Serial.println("Pantalla DWIN inicializada");
+    
+    // Ajustar brillo (0-100)
+    dwin.setBacklight(80);
+    delay(100);
+    
+    // Escribir texto en diferentes direcciones
+    // NOTA: Las direcciones dependen de tu configuración DWIN
+    
+    Serial.println("Escribiendo texto en dirección 0x1000...");
+    dwin.writeText(0x1000, "Hola Mundo!");
+    delay(2000);
+    
+    Serial.println("Escribiendo texto en dirección 0x1100...");
+    dwin.writeText(0x1100, "ESP32 SPI");
+    delay(2000);
+    
+    // Escribir variables numéricas
+    Serial.println("Escribiendo variables...");
+    dwin.writeVariable(0x2000, (uint16_t)1234);  // Número de 16 bits
+    dwin.writeVariable(0x2100, (int32_t)567890); // Número de 32 bits
+    
+    Serial.println("Inicialización completa");
+}
+
+void loop() {
+    static unsigned long lastUpdate = 0;
+    static int counter = 0;
+    static float temperatura = 25.5;
+    
+    // Actualizar cada segundo
+    if (millis() - lastUpdate >= 1000) {
+        lastUpdate = millis();
+        
+        // Mostrar contador
+        String texto = "Cnt: " + String(counter);
+        dwin.writeText(0x1200, texto);
+        
+        // Simular temperatura
+        temperatura += random(-10, 11) / 10.0;
+        if (temperatura < 20.0) temperatura = 20.0;
+        if (temperatura > 30.0) temperatura = 30.0;
+        
+        // Enviar temperatura como entero (multiplicado por 10)
+        int16_t tempInt = (int16_t)(temperatura * 10);
+        dwin.writeVariable(0x3000, (uint16_t)tempInt);
+        
+        counter++;
+        if (counter > 999) {
+            counter = 0;
+        }
+        
+        Serial.print("Contador: ");
+        Serial.print(counter);
+        Serial.print(" | Temperatura: ");
+        Serial.println(temperatura);
+        
+        // Ejemplo de lectura (comentado por defecto)
+        // uint16_t valor = dwin.readVariable(0x2000);
+        // Serial.print("Valor leído: ");
+        // Serial.println(valor);
+    }
+}
+
+// Función auxiliar para mostrar información de estado
+void printSPIInfo() {
+    Serial.println("\n=== Configuración SPI ===");
+    Serial.println("Bus: VSPI (por defecto)");
+    Serial.println("Pines:");
+    Serial.println("  CS   -> GPIO 5");
+    Serial.println("  SCK  -> GPIO 18");
+    Serial.println("  MOSI -> GPIO 23");
+    Serial.println("  MISO -> GPIO 19");
+    Serial.println("Frecuencia: 1MHz");
+    Serial.println("========================\n");
+}

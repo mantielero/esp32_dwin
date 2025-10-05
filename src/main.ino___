@@ -1,0 +1,42 @@
+#include <HardwareSerial.h>
+
+HardwareSerial dwin(2); // UART2 en GPIO16 (RX2), GPIO17 (TX2)
+
+void setup() {
+  Serial.begin(115200);
+  dwin.begin(115200, SERIAL_8N1, 16, 17); // RX, TX
+
+  delay(1000);
+  Serial.println("Enviando texto a pantalla DWIN...");
+
+  sendText(0x5000, "Hola mundo");
+}
+
+void loop() {
+  sendText(0x5000, "Hola mundo");
+  delay(1000);
+}
+
+// --- función para enviar texto a dirección DGUS ---
+void sendText(uint16_t address, const char* text) {
+  uint8_t cmd[100];
+  uint8_t len = 0;
+
+  // Protocolo DGUS: 5A A5 LEN 82 [addrH] [addrL] [data...]
+  cmd[len++] = 0x5A;
+  cmd[len++] = 0xA5;
+
+  uint8_t dataLen = strlen(text) + 3; // 3 = 82 + addrH + addrL
+  cmd[len++] = dataLen;
+  cmd[len++] = 0x82;
+  cmd[len++] = address >> 8;
+  cmd[len++] = address & 0xFF;
+
+  // texto ASCII
+  for (int i = 0; i < strlen(text); i++) {
+    cmd[len++] = text[i];
+  }
+
+  // enviar
+  dwin.write(cmd, len);
+}

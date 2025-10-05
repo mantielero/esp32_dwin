@@ -1,0 +1,276 @@
+#include <HardwareSerial.h>
+
+// Configuración del puerto serial para la pantalla DWIN T5UIC1
+HardwareSerial DWINSerial(2); // Usamos UART2 del ESP32
+
+// Pines de conexión
+#define DWIN_RX 16  // GPIO16 del ESP32 -> TX de la pantalla
+#define DWIN_TX 17  // GPIO17 del ESP32 -> RX de la pantalla
+
+// Protocolo DWIN T5UIC1 (Ender 3 V2)
+const uint8_t FRAME_HEADER = 0xAA;
+const uint8_t FRAME_TAIL[4] = {0xCC, 0x33, 0xC3, 0x3C};
+
+// Comandos
+const uint8_t CMD_HANDSHAKE = 0x00;
+const uint8_t CMD_DRAW_STRING = 0x11;
+const uint8_t CMD_CLEAR_SCREEN = 0x01;
+const uint8_t CMD_BACKLIGHT = 0x30;
+const uint8_t CMD_SET_DIRECTION = 0x34;
+const uint8_t CMD_UPDATE_LCD = 0x3D;
+
+// Tamaños de fuente
+const uint8_t FONT_6x12 = 0x00;
+const uint8_t FONT_8x16 = 0x01;
+const uint8_t FONT_10x20 = 0x02;
+const uint8_t FONT_12x24 = 0x03;
+const uint8_t FONT_14x28 = 0x04;
+const uint8_t FONT_16x32 = 0x05;
+const uint8_t FONT_20x40 = 0x06;
+const uint8_t FONT_24x48 = 0x07;
+const uint8_t FONT_28x56 = 0x08;
+const uint8_t FONT_32x64 = 0x09;
+
+// Colores (RGB565)
+const uint16_t COLOR_WHITE = 0xFFFF;
+const uint16_t COLOR_BLACK = 0x0000;
+const uint16_t COLOR_RED = 0xF800;
+const uint16_t COLOR_GREEN = 0x07E0;
+const uint16_t COLOR_BLUE = 0x001F;
+const uint16_t COLOR_YELLOW = 0xFFE0;
+const uint16_t COLOR_BG_BLACK = 0x0841;
+const uint16_t COLOR_BG_BLUE = 0x1125;
+
+// Dimensiones de la pantalla
+const uint16_t DWIN_WIDTH = 272;
+const uint16_t DWIN_HEIGHT = 480;
+
+// Buffer para construir comandos
+uint8_t sendBuf[256];
+uint8_t bufIndex = 0;
+
+void setup() {
+  Serial.begin(115200);
+  DWINSerial.begin(115200, SERIAL_8N1, DWIN_RX, DWIN_TX);
+  
+  delay(500);
+  
+  Serial.println("\n=== Inicializando pantalla DWIN T5UIC1 (Ender 3 V2) ===");
+  
+  // Realizar handshake
+  if (handshake()) {
+    Serial.println("✓ Handshake exitoso");
+    
+    delay(100);
+    
+    // Configurar orientación (1 = 90°, ajustar según tu montaje)
+    setScreenOrientation(1);
+    delay(50);
+    
+    // Limpiar pantalla
+    clearScreen(COLOR_BG_BLACK);
+    delay(100);
+    
+    // Escribir "Hola mundo"
+    drawString(true, true, FONT_16x32, COLOR_WHITE, COLOR_BG_BLACK, 10, 100, "Hola mundo");
+    
+    // Actualizar pantalla
+    updateLCD();
+    
+    Serial.println("✓ Texto mostrado en pantalla");
+  } else {
+    Serial.println("✗ Error en handshake");
+  }
+}
+
+void loop() {
+  // Ejemplo: cambiar el texto cada 3 segundos
+  static unsigned long lastUpdate = 0;
+  static bool toggle = false;
+  
+  if (millis() - lastUpdate > 3000) {
+    lastUpdate = millis();
+    toggle = !toggle;
+    
+    if (toggle) {
+      drawString(true, true, FONT_16x32, COLOR_YELLOW, COLOR_BG_BLACK, 10, 100, "Hola mundo");
+    } else {
+      drawString(true, true, FONT_16x32, COLOR_GREEN, COLOR_BG_BLACK, 10, 100, "ESP32 DWIN");
+    }
+    updateLCD();
+  }
+}
+
+// ============= Funciones del protocolo DWIN T5UIC1 =============
+
+void startFrame() {
+  bufIndex = 0;
+  sendBuf[bufIndex++] = FRAME_HEADER;
+}
+
+void addByte(uint8_t value) {
+  sendBuf[bufIndex++] = value;
+}
+
+void addWord(uint16_t value) {
+  sendBuf[bufIndex++] = (value >> 8) & 0xFF;  // High byte
+  sendBuf[bufIndex++] = value & 0xFF;         // Low byte
+}
+
+void addString(const char* str) {
+  while (*str) {
+    sendBuf[bufIndex++] = *str++;
+  }
+}
+
+void sendFrame() {
+  // Enviar buffer
+  DWINSerial.write(sendBuf, bufIndex);
+  // Enviar tail
+  DWINSerial.write(FRAME_TAIL, 4);
+  
+  delay(1); // Pequeño delay entre comandos
+}
+
+// Handshake con la pantalla
+bool handshake() {
+  Serial.println("Enviando handshake...");
+  
+  startFrame();
+  addByte(CMD_HANDSHAKE);
+  sendFrame();
+  
+  delay(100);
+  
+  // Esperar respuesta: AA 00 'O' 'K'
+  uint8_t response[26];
+  int recNum = 0;
+  unsigned long timeout = millis();
+  
+  while (millis() - timeout < 500 && recNum < 26) {
+    if (DWINSerial.available()) {
+      response[recNum] = DWINSerial.read();
+      
+      // Verificar que el primer byte es correcto
+      if (response[0] != 0xAA && recNum > 0) {
+        recNum = 0;
+        continue;
+      }
+      
+      recNum++;
+      delay(10);
+    }
+  }
+  
+  // Verificar respuesta: AA 00 'O' 'K'
+  bool success = (recNum >= 4 && 
+                  response[0] == 0xAA && 
+                  response[1] == 0x00 && 
+                  response[2] == 'O' && 
+                  response[3] == 'K');
+  
+  if (success) {
+    Serial.printf("Respuesta handshake: ");
+    for (int i = 0; i < min(recNum, 10); i++) {
+      Serial.printf("%02X ", response[i]);
+    }
+    Serial.println();
+  }
+  
+  return success;
+}
+
+// Limpiar pantalla
+void clearScreen(uint16_t color) {
+  startFrame();
+  addByte(CMD_CLEAR_SCREEN);
+  addWord(color);
+  sendFrame();
+}
+
+// Establecer brillo de retroiluminación (0x1F-0xFF)
+void setBacklight(uint8_t brightness) {
+  startFrame();
+  addByte(CMD_BACKLIGHT);
+  addByte(brightness < 0x1F ? 0x1F : brightness);
+  sendFrame();
+}
+
+// Establecer orientación de pantalla
+// dir: 0=0°, 1=90°, 2=180°, 3=270°
+void setScreenOrientation(uint8_t dir) {
+  startFrame();
+  addByte(CMD_SET_DIRECTION);
+  addByte(0x5A);
+  addByte(0xA5);
+  addByte(dir);
+  sendFrame();
+}
+
+// Actualizar pantalla
+void updateLCD() {
+  startFrame();
+  addByte(CMD_UPDATE_LCD);
+  sendFrame();
+}
+
+// Dibujar texto
+// widthAdjust: true=ajustar ancho automáticamente
+// bShow: true=mostrar color de fondo
+// size: tamaño de fuente (usar constantes FONT_*)
+// color: color del texto (RGB565)
+// bColor: color de fondo (RGB565)
+// x, y: coordenadas superior izquierda
+// text: texto a mostrar
+void drawString(bool widthAdjust, bool bShow, uint8_t size, 
+                uint16_t color, uint16_t bColor, 
+                uint16_t x, uint16_t y, const char* text) {
+  startFrame();
+  addByte(CMD_DRAW_STRING);
+  
+  // Byte de configuración:
+  // Bit 7: widthAdjust
+  // Bit 6: bShow (mostrar fondo)
+  // Bit 5-4: Sin usar
+  // Bit 3-0: size
+  uint8_t config = (widthAdjust ? 0x80 : 0x00) | 
+                   (bShow ? 0x40 : 0x00) | 
+                   (size & 0x0F);
+  addByte(config);
+  
+  addWord(color);
+  addWord(bColor);
+  addWord(x);
+  addWord(y);
+  addString(text);
+  
+  sendFrame();
+}
+
+// Ejemplo de dibujar un número entero
+void drawIntValue(bool bShow, bool zeroFill, bool zeroMode, uint8_t size,
+                  uint16_t color, uint16_t bColor, uint8_t digits,
+                  uint16_t x, uint16_t y, int32_t value) {
+  startFrame();
+  addByte(0x14); // Comando para dibujar número
+  
+  uint8_t config = (bShow ? 0x80 : 0x00) | 
+                   (zeroFill ? 0x20 : 0x00) |
+                   (zeroMode ? 0x10 : 0x00) |
+                   (size & 0x0F);
+  addByte(config);
+  
+  addWord(color);
+  addWord(bColor);
+  addByte(digits);  // Número de dígitos enteros
+  addByte(0);       // Número de decimales
+  addWord(x);
+  addWord(y);
+  
+  // Enviar valor como 8 bytes (64 bits)
+  for (int i = 7; i >= 0; i--) {
+    addByte((value >> (i * 8)) & 0xFF);
+  }
+  
+  sendFrame();
+}
