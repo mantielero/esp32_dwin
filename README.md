@@ -6,5 +6,8 @@ I'd like to be able to interact with Creality Ender 3 v2 screen with an ESP32. T
 I managed to do so using DWIN and using this code: https://github.com/RobRobM/DWIN_T5UIC1_LCD_E3S1
 
 ## Wiring
-The protocol used by the screen is UART. The screen requires 5V 
+The protocol used by the screen is UART. The screen requires 5V for the power (about 300mA I heard). And two wires for the UART (related to the display). In the future, I'd like to coverte the rotary button as well.
 ![](./docs/ext.png)
+
+The ESP requires to use GPIO16 and GPIO17: 
+![](./docs/esp32.png)
